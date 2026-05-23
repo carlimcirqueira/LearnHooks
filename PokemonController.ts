@@ -1,6 +1,10 @@
 import { Request, Response } from 'express';
-import { PokemonRepository } from './Pokemon.repository';
+import { getPokemonRepository } from './Pokemon.repository';
 import { Pokemon } from './Pokemon.entity';
+
+const DEFAULT_PAGE = 1;
+const DEFAULT_LIMIT = 50;
+const MAX_LIMIT = 100;
 
 export class PokemonController {
   /**
@@ -49,7 +53,7 @@ export class PokemonController {
     pokemon.name = name;
     pokemon.type = type;
 
-    const createdPokemon = await new PokemonRepository().insert(pokemon);
+    const createdPokemon = await getPokemonRepository().insert(pokemon);
 
     if (createdPokemon) {
       res.status(201).json({ data: pokemon });
@@ -68,6 +72,22 @@ export class PokemonController {
    *       - application/json
    *     produces:
    *       - application/json
+   *     parameters:
+   *       - in: query
+   *         name: page
+   *         schema:
+   *           type: integer
+   *           minimum: 1
+   *           default: 1
+   *         description: Número da página
+   *       - in: query
+   *         name: limit
+   *         schema:
+   *           type: integer
+   *           minimum: 1
+   *           maximum: 100
+   *           default: 50
+   *         description: Quantidade de itens por página
    *     responses:
    *       '200':
    *          description: Lista de Pokémons retornados com sucesso
@@ -82,14 +102,34 @@ export class PokemonController {
    *          description: Erro interno do servidor
    */
   async list(req: Request, res: Response) {
-    const [items, total] = await new PokemonRepository().findAndCount();
+    if (process.env.LEGACY_LIST === 'true') {
+      const [items, total] = await getPokemonRepository().findAndCount();
+      return res.status(200).send({ data: { items, total } });
+    }
 
-    const pokemons = {
-      items: items,
-      total: total
-    };
+    const page = Math.max(DEFAULT_PAGE, Number(req.query.page) || DEFAULT_PAGE);
+    const limit = Math.min(
+      MAX_LIMIT,
+      Math.max(1, Number(req.query.limit) || DEFAULT_LIMIT)
+    );
+    const skip = (page - 1) * limit;
 
-    return res.status(200).send({ data: pokemons });
+    const [items, total] = await getPokemonRepository().findAndCount({
+      skip,
+      take: limit,
+      order: { id: 'ASC' },
+      select: ['id', 'name', 'type', 'createdAt', 'updatedAt']
+    });
+
+    return res.status(200).json({
+      data: {
+        items,
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit)
+      }
+    });
   }
 
   /**
@@ -116,7 +156,7 @@ export class PokemonController {
    *          description: Erro interno do servidor
    */
   async count(req: Request, res: Response) {
-    const total = await new PokemonRepository().count();
+    const total = await getPokemonRepository().count();
 
     return res.status(200).send({ total });
   }
@@ -156,7 +196,7 @@ export class PokemonController {
   async getOne(req: Request, res: Response) {
     const name = req.params.name;
 
-    const pokemon = await new PokemonRepository().findOne({ where: { name } });
+    const pokemon = await getPokemonRepository().findOne({ where: { name } });
 
     return res.status(pokemon ? 200 : 404).send({ data: pokemon });
   }
@@ -185,7 +225,7 @@ export class PokemonController {
    *          description: Erro interno do servidor
    */
   async delete(req: Request, res: Response) {
-    await new PokemonRepository().clear();
+    await getPokemonRepository().clear();
     return res.status(200).send({ data: 'Pokemons excluídos com sucesso!' });
   }
 }
